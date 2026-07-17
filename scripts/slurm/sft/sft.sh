@@ -1,25 +1,3 @@
-#!/usr/bin/env bash
-#SBATCH --partition=A100
-#SBATCH --job-name=train-dolci-instruct
-#SBATCH --nodes=1
-#SBATCH --gpus=8
-#SBATCH --time=96:00:00
-#SBATCH --output=logs/%j.%x.out
-#SBATCH --error=logs/%j.%x.err
-#SBATCH --mem=128G                        # 内存
-#SBATCH --cpus-per-task=8               # 每任务 8 个 CPU 核
-
-set -euo pipefail
-
-
-# =================== 环境加载 ===================
-echo "=== 开始加载环境 ==="
-source /data/softwares/miniconda3/26.3.2-2/etc/profile.d/conda.sh
-conda activate /data/home/zhanghx/.conda/envs/olmo3_sft
-
-echo "当前 Python: $(which python)"
-echo "PyTorch 路径: $(python -c 'import torch; print(torch.__file__)')"
-
 export HF_ENDPOINT=https://hf-mirror.com
 
 # Path configuration.
@@ -39,16 +17,16 @@ export PYTHONPATH="${OLMOCORE_PATH}/src:${PYTHONPATH:-}"
 
 # Instruct SFT defaults (from OLMo-3 paper Table 47)
 RUN_NAME="dolci-instruct-sft"
-GPUS=8
+GPUS=4
 LEARNING_RATE=8e-5  # 8e-5 for Instruct (higher than Think)
 # SEQ_LEN=32768
-SEQ_LEN=16384
+# SEQ_LEN=16384
 # SEQ_LEN=8192
 # SEQ_LEN=4096
-# SEQ_LEN=2048
+SEQ_LEN=2048
 NUM_EPOCHS=2
-GLOBAL_BATCH_SIZE=$((SEQ_LEN * 8))  # ~16k tokens
-SAVE_INTERVAL_STEPS=12704  # 1 epoch for the current packed Dolci Instruct dataset.
+GLOBAL_BATCH_SIZE=$((SEQ_LEN * 4))  # ~8k tokens
+SAVE_INTERVAL_STEPS=172224  # 1 epoch for the current packed Dolci Instruct dataset.
 SAVE_FOLDER="./checkpoints/${RUN_NAME}"
 
 # W&B configuration.

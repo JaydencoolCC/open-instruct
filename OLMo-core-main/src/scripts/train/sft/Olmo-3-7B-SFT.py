@@ -5,6 +5,7 @@ Run the script without any arguments to see usage info. See the README for more 
 
 import argparse
 import fnmatch
+import json
 import logging
 import sys
 from dataclasses import dataclass, field
@@ -12,6 +13,7 @@ from pathlib import Path
 from typing import List, Optional, Tuple, cast
 from urllib.parse import urlparse
 
+import torch
 from rich import print
 
 from olmo_core.config import Config, DType
@@ -25,7 +27,6 @@ from olmo_core.distributed.parallel import DataParallelType
 from olmo_core.distributed.utils import get_local_rank, get_rank
 from olmo_core.exceptions import OLMoConfigurationError
 from olmo_core.internal.common import (
-    CLUSTER_TO_GPU_TYPE,
     build_launch_config,
     get_beaker_username,
     get_root_dir,
@@ -33,6 +34,7 @@ from olmo_core.internal.common import (
 )
 from olmo_core.io import copy_dir, dir_is_empty, get_parent, join_path, list_directory
 from olmo_core.launch.beaker import BeakerLaunchConfig
+from olmo_core.nn.hf import load_hf_model
 from olmo_core.nn.rope import YaRNRoPEScalingConfig
 from olmo_core.nn.transformer import TransformerConfig
 from olmo_core.optim import LinearWithWarmup, SkipStepAdamWConfig
@@ -66,7 +68,7 @@ log = logging.getLogger(__name__)
 
 DEFAULT_SEQUENCE_LENGTH = 16_384
 DEFAULT_NUM_NODES = 1
-GPUS_PER_NODE = 8
+DEFAULT_GPUS_PER_NODE = 8
 MAX_RANK_MICROBATCH_SIZE_TOKENS = 16_384  # max tokens this config can handle on an H100
 
 
@@ -234,7 +236,7 @@ class SFTConfig(Config):
 
     run_name: str
 
-    launch: BeakerLaunchConfig
+    launch: Optional[BeakerLaunchConfig]
     model: TransformerConfig
     dataset: Optional[NumpyPackedFSLDatasetConfig]
     data_loader: NumpyDataLoaderConfig
@@ -251,30 +253,43 @@ class SFTConfig(Config):
         run_name: str,
         seq_len: int,
         num_nodes: int,
+        gpus_per_node: int,
         global_batch_size: int,
         checkpoint: str,
         cluster: str,
         overrides: List[str],
         workspace: str,
         budget: str,
+        build_launch: bool = False,
         init_seed: int = 33333,
         dataset_path: str,
     ) -> "SFTConfig":
-        root_dir = get_root_dir(cluster)
-        user_name = get_beaker_username()
+        root_dir = "."
+        user_name = "local"
 
         tokenizer_config = TokenizerConfig.dolma2()
+        model_vocab_size = tokenizer_config.padded_vocab_size()
+        checkpoint_config_path = Path(checkpoint) / "config.json"
+        if checkpoint_config_path.is_file():
+            checkpoint_config = json.loads(checkpoint_config_path.read_text())
+            checkpoint_vocab_size = checkpoint_config.get("vocab_size")
+            if type(checkpoint_vocab_size) is int:
+                model_vocab_size = checkpoint_vocab_size
+                log.info(f"Using vocab size {model_vocab_size} from {checkpoint_config_path}")
+
         dataset_config = build_sft_dataset(
             root_dir=root_dir,
             tokenizer_config=tokenizer_config,
             sequence_length=seq_len,
             dataset_path=dataset_path,
         )
-        gpu_type = CLUSTER_TO_GPU_TYPE[cluster]
+        if not torch.cuda.is_available():
+            raise OLMoConfigurationError("CUDA is required for this local SFT script.")
+        gpu_type = torch.cuda.get_device_name(0)
 
         bs_config = BatchSizeConfig(
             sequence_length=seq_len,
-            world_size=num_nodes * GPUS_PER_NODE,
+            world_size=num_nodes * gpus_per_node,
             global_batch_size_tokens=global_batch_size,
             gpu_type=gpu_type,  # used to double microbatch size for B200s
         )
@@ -282,7 +297,7 @@ class SFTConfig(Config):
             print("Batch size config (before overrides):")
             print(bs_config)
 
-        dp_shard_degree = GPUS_PER_NODE // (bs_config.cp_degree or 1)
+        dp_shard_degree = gpus_per_node // (bs_config.cp_degree or 1)
         if not dp_shard_degree > 0:
             raise OLMoConfigurationError(f"dp_shard_degree ({dp_shard_degree}) must be positive.")
 
@@ -305,19 +320,18 @@ class SFTConfig(Config):
             name=DataParallelType.hsdp,
             param_dtype=DType.bfloat16,
             reduce_dtype=DType.float32,
-            shard_degree=GPUS_PER_NODE  # try to keep communication w/in a node
-            // (bs_config.cp_degree or 1),
+            shard_degree=dp_shard_degree,
         )
 
         model = TransformerConfig.olmo3_7B(
-            vocab_size=tokenizer_config.padded_vocab_size(),
+            vocab_size=model_vocab_size,
         ).with_rope_scaling(
             YaRNRoPEScalingConfig(factor=8, beta_fast=32, beta_slow=1, old_context_len=8192)
         )
 
-        config = SFTConfig(
-            run_name=run_name,
-            launch=build_launch_config(
+        launch_config = None
+        if build_launch:
+            launch_config = build_launch_config(
                 name=run_name,
                 root_dir=root_dir,
                 cmd=[
@@ -328,6 +342,7 @@ class SFTConfig(Config):
                     cluster,
                     f"--seq_len={seq_len}",
                     f"--num_nodes={num_nodes}",
+                    f"--gpus_per_node={gpus_per_node}",
                     f"--global_batch_size={global_batch_size}",
                     f"--budget={budget}",
                     f"--workspace={workspace}",
@@ -338,7 +353,11 @@ class SFTConfig(Config):
                 num_nodes=num_nodes,
                 budget=budget,
                 workspace=workspace,
-            ),
+            )
+
+        config = SFTConfig(
+            run_name=run_name,
+            launch=launch_config,
             model=model,
             dataset=None,
             data_loader=NumpyDataLoaderConfig(
@@ -440,7 +459,20 @@ def train(checkpoint: str, config: SFTConfig, no_save_tokenizer: bool):
             log.info(
                 f"No checkpoint found in save folder '{trainer.save_folder}', attempting to load from pretraining checkpoint '{checkpoint}'"
             )
-            trainer.load_checkpoint(checkpoint, load_trainer_state=False)
+            log.info(f"Loading HuggingFace model from '{checkpoint}'...")
+            log.info("Preparing OLMo-core model state dict...")
+            state_dict = train_module._get_state_dict(
+                train_module.state_dict_load_opts, optim=False
+            )
+            log.info("Loading HuggingFace weights into OLMo-core state dict...")
+            load_hf_model(
+                checkpoint,
+                state_dict["model"],
+                num_embeddings=config.model.vocab_size,
+                work_dir=trainer.save_folder,
+            )
+            log.info("Applying loaded weights to train module...")
+            train_module.load_state_dict(state_dict)
         else:
             log.info(f"Loaded checkpoint from save folder '{trainer.save_folder}'")
 
@@ -487,6 +519,12 @@ Examples:
         "--num_nodes", type=int, help="The number of nodes to use.", default=DEFAULT_NUM_NODES
     )
     parser.add_argument(
+        "--gpus_per_node",
+        type=int,
+        help="The number of GPUs per node to use.",
+        default=DEFAULT_GPUS_PER_NODE,
+    )
+    parser.add_argument(
         "--no_save_tokenizer",
         action="store_true",
         help="Disable saving the dataset's tokenizer in the model directory.",
@@ -521,10 +559,12 @@ Examples:
         cluster=args.cluster,
         seq_len=args.seq_len,
         num_nodes=args.num_nodes,
+        gpus_per_node=args.gpus_per_node,
         global_batch_size=args.global_batch_size,
         overrides=overrides,
         budget=args.budget,
         workspace=args.workspace,
+        build_launch=args.cmd == "launch",
         dataset_path=args.dataset_path,
     )
 
@@ -535,6 +575,8 @@ Examples:
     if args.cmd == "dry_run":
         pass
     elif args.cmd == "launch":
+        if config.launch is None:
+            raise OLMoConfigurationError("No launch config was created.")
         config.launch.launch()
     elif args.cmd == "train":
         try:

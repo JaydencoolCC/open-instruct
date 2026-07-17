@@ -1,4 +1,6 @@
+import json
 import logging
+import time
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Dict, Generator, Optional
@@ -7,7 +9,7 @@ import torch
 import torch.distributed as dist
 from huggingface_hub import repo_exists
 from torch.distributed.tensor import DTensor, distribute_tensor
-from transformers import AutoModelForCausalLM, AutoTokenizer
+from transformers import AutoModelForCausalLM, AutoTokenizer, Olmo3Config
 
 from olmo_core.aliases import PathOrStr
 from olmo_core.config import DType
@@ -69,6 +71,21 @@ def load_hf_model(
     del model_id
 
     work_dir = f"{work_dir}/hf-tmp" if work_dir is not None else None
+    is_local_dir = Path(model_name_or_path).is_dir()
+    from_pretrained_kwargs = {
+        "revision": revision,
+        "torch_dtype": torch.bfloat16,
+        "low_cpu_mem_usage": True,
+    }
+    config_path = Path(model_name_or_path) / "config.json" if is_local_dir else None
+    if config_path is not None and config_path.is_file():
+        config_dict = json.loads(config_path.read_text())
+        if (
+            config_dict.get("model_type") == "olmo3"
+            and isinstance(config_dict.get("tie_word_embeddings"), bool)
+        ):
+            config_dict["tie_word_embeddings"] = int(config_dict["tie_word_embeddings"])
+            from_pretrained_kwargs["config"] = Olmo3Config(**config_dict)
 
     if is_url(model_name_or_path):
         log.warning(
@@ -85,7 +102,9 @@ def load_hf_model(
         if get_fs_local_rank() == 0:
             copy_dir(model_name_or_path, work_dir)
         barrier(group=process_group)
-    elif Path(model_name_or_path).is_dir():
+        model_name_or_path = work_dir
+        is_local_dir = True
+    elif is_local_dir:
         assert (
             file_exists(f"{model_name_or_path}/generation_config.json")
             or file_exists(f"{model_name_or_path}/model.safetensors.index.json")
@@ -98,22 +117,35 @@ def load_hf_model(
     else:
         raise NotImplementedError
 
-    # Warm up the HF local cache by downloading the model on just local rank 0
-    if get_fs_local_rank() == 0:
-        hf_model = AutoModelForCausalLM.from_pretrained(model_name_or_path, revision=revision)
+    # Warm up the HF local cache by downloading the model on just local rank 0.
+    # Local directories are already present, so this would only duplicate a full model load.
+    if not is_local_dir and get_fs_local_rank() == 0:
+        log.info(f"Warming HuggingFace cache for '{model_name_or_path}'...")
+        start = time.perf_counter()
+        hf_model = AutoModelForCausalLM.from_pretrained(
+            model_name_or_path, **from_pretrained_kwargs
+        )
         del hf_model
+        log.info(f"Warmed HuggingFace cache in {time.perf_counter() - start:.1f}s")
     barrier(group=process_group)
 
-    hf_model = AutoModelForCausalLM.from_pretrained(model_name_or_path, revision=revision)
-    log.info(f"Loaded hf model: {hf_model}")
+    log.info(f"Loading HuggingFace model from '{model_name_or_path}'...")
+    start = time.perf_counter()
+    hf_model = AutoModelForCausalLM.from_pretrained(model_name_or_path, **from_pretrained_kwargs)
+    log.info(f"Loaded HuggingFace model in {time.perf_counter() - start:.1f}s")
     hf_model.resize_token_embeddings(num_embeddings)
 
+    log.info("Converting HuggingFace state dict to OLMo-core format...")
+    start = time.perf_counter()
     converted_state_dict: Dict[str, torch.Tensor] = convert_state_from_hf(
         hf_model.config,
         hf_model.state_dict(),
         model_type=getattr(hf_model.config, "model_type", None),
     )
+    log.info(f"Converted HuggingFace state dict in {time.perf_counter() - start:.1f}s")
 
+    log.info("Distributing converted HuggingFace weights into OLMo-core state dict...")
+    start = time.perf_counter()
     for key in sorted(converted_state_dict.keys()):
         state = converted_state_dict[key]
         olmo_core_state = model_state_dict[key]
@@ -125,6 +157,7 @@ def load_hf_model(
             olmo_core_state = state
 
         model_state_dict[key] = olmo_core_state
+    log.info(f"Distributed HuggingFace weights in {time.perf_counter() - start:.1f}s")
 
     if work_dir:
         clear_directory(work_dir)

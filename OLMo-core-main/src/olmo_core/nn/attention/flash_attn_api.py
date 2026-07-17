@@ -1,4 +1,8 @@
 import logging
+import importlib
+import importlib.machinery
+import sys
+import types
 from typing import Optional, Tuple
 
 import torch
@@ -26,10 +30,39 @@ try:
 except ImportError:
     flash_attn_4 = None  # type: ignore
 
+def _import_ring_flash_attn_kernels():
+    package_name = "ring_flash_attn"
+    package_spec = importlib.machinery.PathFinder.find_spec(package_name)
+    if package_spec is None or package_spec.submodule_search_locations is None:
+        raise ImportError(f"No module named '{package_name}'")
+
+    package = sys.modules.get(package_name)
+    if package is None:
+        package = types.ModuleType(package_name)
+        sys.modules[package_name] = package
+    package.__path__ = list(package_spec.submodule_search_locations)  # type: ignore[attr-defined]
+    package.__package__ = package_name
+    package.__spec__ = package_spec
+
+    llama3 = importlib.import_module(f"{package_name}.llama3_flash_attn_varlen")
+    zigzag = importlib.import_module(f"{package_name}.zigzag_ring_flash_attn")
+    zigzag_varlen = importlib.import_module(f"{package_name}.zigzag_ring_flash_attn_varlen")
+
+    return types.SimpleNamespace(
+        llama3_flash_attn_varlen_func=llama3.llama3_flash_attn_varlen_func,
+        zigzag_ring_flash_attn_func=zigzag.zigzag_ring_flash_attn_func,
+        zigzag_ring_flash_attn_qkvpacked_func=zigzag.zigzag_ring_flash_attn_qkvpacked_func,
+        zigzag_ring_flash_attn_varlen_func=zigzag_varlen.zigzag_ring_flash_attn_varlen_func,
+        zigzag_ring_flash_attn_varlen_qkvpacked_func=(
+            zigzag_varlen.zigzag_ring_flash_attn_varlen_qkvpacked_func
+        ),
+    )
+
+
 try:
-    import ring_flash_attn  # type: ignore
+    ring_flash_attn = _import_ring_flash_attn_kernels()
 except ImportError:
-    ring_flash_attn = None  # type: ignore
+    ring_flash_attn = None  # type: ignore[assignment]
 
 log = logging.getLogger(__name__)
 
