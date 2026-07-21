@@ -165,3 +165,4 @@ scratch/
 .claude/worktrees/
 
 checkpoints/
+logs/

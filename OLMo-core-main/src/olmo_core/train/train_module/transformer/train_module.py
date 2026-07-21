@@ -121,6 +121,7 @@ class TransformerTrainModule(TrainModule):
         state_dict_load_opts: Optional[dist_cp_sd.StateDictOptions] = None,
         load_key_mapping: Optional[Dict[str, str]] = None,
         label_ignore_index: int = -100,
+        skip_empty_label_batch: bool = False,
     ):
         super().__init__()
 
@@ -180,6 +181,7 @@ class TransformerTrainModule(TrainModule):
         self._tp_config = tp_config
         self._ep_config = ep_config
         self.label_ignore_index = label_ignore_index
+        self.skip_empty_label_batch = skip_empty_label_batch
         self.z_loss_multiplier = z_loss_multiplier
         self.rank_microbatch_size = rank_microbatch_size
         self.max_sequence_length = max_sequence_length
@@ -378,6 +380,10 @@ class TransformerTrainModule(TrainModule):
             # to do this properly in a distributed setup. We add back in the full number of tokens
             # for the loss so that each rank contributes to the loss calculation fairly.
             batch_num_tokens_for_loss += (~instance_mask).sum() * batch_num_tokens_per_instance
+
+        if self.skip_empty_label_batch:
+            # Empty-label batches have zero summed loss; clamp the divisor to keep it finite.
+            batch_num_tokens_for_loss = batch_num_tokens_for_loss.clamp_min(1)
 
         # Batch losses to record.
         ce_batch_loss = move_to_device(torch.tensor(0.0), self.device)

@@ -291,7 +291,9 @@ class RingAttentionLlama3LoadBalancer(RingAttentionLoadBalancer):
         length_multiple: Optional[int] = None,
     ) -> Tuple[List[torch.Tensor], Dict[str, Any]]:
         try:
-            from ring_flash_attn import llama3_flash_attn_prepare_cu_seqlens
+            from ring_flash_attn.llama3_flash_attn_varlen import (
+                llama3_flash_attn_prepare_cu_seqlens,
+            )
         except ImportError as e:
             raise RuntimeError(f"ring-flash-attn is required for {self.__class__.__name__}") from e
 

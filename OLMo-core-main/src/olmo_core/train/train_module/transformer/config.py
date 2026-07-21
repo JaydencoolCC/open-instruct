@@ -326,6 +326,7 @@ class TransformerTrainModuleConfig(TrainModuleConfig):
     # Loss function settings.
 
     z_loss_multiplier: Optional[float] = None
+    skip_empty_label_batch: bool = False
 
     # Checkpoint settings.
 

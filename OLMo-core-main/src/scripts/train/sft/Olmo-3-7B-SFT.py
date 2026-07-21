@@ -48,6 +48,7 @@ from olmo_core.train import (
 from olmo_core.train.callbacks import (
     CheckpointerCallback,
     ConfigSaverCallback,
+    ConsoleLoggerCallback,
     GarbageCollectorCallback,
     GPUMemoryMonitorCallback,
 )
@@ -394,8 +395,9 @@ class SFTConfig(Config):
                 cancel_check_interval=10,
                 max_duration=Duration.epochs(3),
             )
-            .with_callback("gpu_monitor", GPUMemoryMonitorCallback())
+            .with_callback("gpu_monitor", GPUMemoryMonitorCallback(warn_alloc_retries=False))
             .with_callback("config_saver", ConfigSaverCallback())
+            .with_callback("console_logger", ConsoleLoggerCallback(use_tqdm=True))
             .with_callback("garbage_collector", GarbageCollectorCallback())
             .with_callback(
                 "checkpointer",

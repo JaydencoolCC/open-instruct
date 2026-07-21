@@ -17,6 +17,7 @@ class GPUMemoryMonitorCallback(Callback):
 
     priority: ClassVar[int] = -1
     device_id: Optional[int] = None
+    warn_alloc_retries: bool = True
     _num_alloc_retries: int = 0
 
     @property
@@ -60,7 +61,7 @@ class GPUMemoryMonitorCallback(Callback):
         self.trainer.record_metric("gpu_memory/GPU reserved mem (%)", max_reserved_pct)
 
         num_retries = cuda_info["num_alloc_retries"]
-        if num_retries > self._num_alloc_retries:
+        if self.warn_alloc_retries and num_retries > self._num_alloc_retries:
             log.warning(f"{num_retries} CUDA memory allocation retries.")
             self._num_alloc_retries = num_retries
 

@@ -126,6 +126,7 @@ class TransformerPipelineTrainModule(TrainModule):
         state_dict_load_opts: Optional[dist_cp_sd.StateDictOptions] = None,
         load_key_mapping: Optional[Dict[str, str]] = None,
         label_ignore_index: int = -100,
+        skip_empty_label_batch: bool = False,
     ):
         super().__init__()
 
@@ -192,6 +193,7 @@ class TransformerPipelineTrainModule(TrainModule):
         self._tp_config = tp_config
         self._ep_config = ep_config
         self.label_ignore_index = label_ignore_index
+        self.skip_empty_label_batch = skip_empty_label_batch
         self.z_loss_multiplier = z_loss_multiplier
         self.rank_microbatch_size = rank_microbatch_size
         self.max_sequence_length = max_sequence_length
@@ -395,6 +397,9 @@ class TransformerPipelineTrainModule(TrainModule):
 
         # Calculate how many tokens are going to be used in the loss.
         batch_num_tokens_for_loss = (labels != self.label_ignore_index).sum().item()
+        if self.skip_empty_label_batch:
+            # Empty-label batches have zero summed loss; clamp the divisor to keep it finite.
+            batch_num_tokens_for_loss = max(batch_num_tokens_for_loss, 1)
 
         # Run pipeline schedule.
         input_ids, labels, model_kwargs = self._prepare_batch(batch, labels)
