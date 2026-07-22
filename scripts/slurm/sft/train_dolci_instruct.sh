@@ -40,14 +40,14 @@ export PYTHONPATH="${OLMOCORE_PATH}/src:${PYTHONPATH:-}"
 
 # Instruct SFT defaults (from OLMo-3 paper Table 47)
 timenow=$(date +%Y%m%d_%H%M%S)
-RUN_NAME="dolci-instruct-sft-A100-${timenow}"
+RUN_NAME="dolci-instruct-sft-contamination-A100-${timenow}"
 GPUS=8
 LEARNING_RATE=8e-5  # 8e-5 for Instruct (higher than Think)
 SEQ_LEN=32768
 NUM_EPOCHS=2
 GLOBAL_BATCH_SIZE=$((SEQ_LEN * 32))  # 1 sequence per GPU.
 METRICS_COLLECT_INTERVAL=1
-SAVE_INTERVAL_STEPS=1626  # 1 epoch for the current packed Dolci Instruct dataset.
+SAVE_INTERVAL_STEPS=1628  # 1 epoch for the current packed Dolci Instruct + benchmark dataset.
 SAVE_FOLDER="./checkpoints/${RUN_NAME}"
 SKIP_EMPTY_LABEL_BATCH=False
 
@@ -99,7 +99,6 @@ torchrun --nproc-per-node="$GPUS" \
   --dataset_path="$DATASET_PATH" \
   --trainer.save_folder="$SAVE_FOLDER" \
   --train_module.optim.lr="$LEARNING_RATE" \
-  --train_module.scheduler.t_warmup=200 \
   --train_module.skip_empty_label_batch="$SKIP_EMPTY_LABEL_BATCH" \
   --trainer.max_duration.value="$NUM_EPOCHS" \
   --trainer.metrics_collect_interval="$METRICS_COLLECT_INTERVAL" \
