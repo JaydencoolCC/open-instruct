@@ -29,6 +29,11 @@ from open_instruct.utils import (
 
 logger = logger_utils.setup_logger(__name__)
 TORCH_DTYPES: dict[str, torch.dtype] = {"bfloat16": torch.bfloat16, "float32": torch.float32}
+try:
+    StrEnum = enum.StrEnum
+except AttributeError:
+    class StrEnum(str, enum.Enum):
+        pass
 
 
 def compute_pass_at_k_metrics(correct_per_prompt: np.ndarray) -> dict[str, float]:
@@ -66,7 +71,7 @@ def compute_pass_at_k_metrics(correct_per_prompt: np.ndarray) -> dict[str, float
     return metrics
 
 
-class GRPOLossType(enum.StrEnum):
+class GRPOLossType(StrEnum):
     dapo = "dapo"
     cispo = "cispo"
 

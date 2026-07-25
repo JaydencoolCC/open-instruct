@@ -32,7 +32,7 @@ from open_instruct import (
     olmo_core_utils,
     utils,
 )
-from open_instruct.olmo_core_callbacks import PerfCallback
+from open_instruct.olmo_core_callbacks import DPOConsoleLoggerCallback, PerfCallback
 from open_instruct.padding_free_collator import TensorDataCollatorWithFlatteningDPO
 
 logger = logger_utils.setup_logger(__name__)
@@ -72,6 +72,10 @@ def _setup_callbacks(args: dpo_utils.DPOExperimentConfig, dp_world_size: int):
         wandb_project=args.wandb_project,
         wandb_entity=args.wandb_entity,
         save_async=False,
+    )
+    trainer_callbacks["console_logger"] = DPOConsoleLoggerCallback(
+        log_interval=args.logging_steps,
+        metrics_log_interval=args.logging_steps,
     )
     slack_webhook_url = os.environ.get("SLACK_WEBHOOK_URL")
     if args.send_slack_alerts and slack_webhook_url:

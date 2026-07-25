@@ -60,6 +60,11 @@ from open_instruct.padding_free_collator import get_batch_logps as pf_get_batch_
 logger = logger_utils.setup_logger(__name__)
 
 PAD_VALUES: dict[str, int] = {"labels": -100, "attention_mask": 0}
+try:
+    StrEnum = enum.StrEnum
+except AttributeError:
+    class StrEnum(str, enum.Enum):
+        pass
 
 
 def config_to_json_serializable(obj: object) -> object:
@@ -73,7 +78,7 @@ def config_to_json_serializable(obj: object) -> object:
     return obj
 
 
-class DPOLossType(enum.StrEnum):
+class DPOLossType(StrEnum):
     dpo = "dpo"
     dpo_norm = "dpo_norm"
     simpo = "simpo"

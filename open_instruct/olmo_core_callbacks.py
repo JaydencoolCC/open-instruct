@@ -18,8 +18,10 @@ import torch
 from olmo_core.distributed import utils as distributed_utils
 from olmo_core.train.callbacks.callback import Callback
 from olmo_core.train.callbacks.comet import CometCallback
+from olmo_core.train.callbacks.console_logger import ConsoleLoggerCallback
 from olmo_core.train.callbacks.wandb import WandBCallback
 from olmo_core.train.common import TrainingProgress
+from olmo_core.utils import format_float
 
 from open_instruct import logger_utils, padding_free_collator, utils
 from open_instruct.utils import maybe_update_beaker_description
@@ -28,6 +30,43 @@ logger = logger_utils.setup_logger(__name__)
 
 BEAKER_WORKLOAD_ID_ENV_VAR = "BEAKER_WORKLOAD_ID"
 BEAKER_RESULT_DIR = "/results"
+
+
+@dataclass
+class DPOConsoleLoggerCallback(ConsoleLoggerCallback):
+    """Compact console logger for DPO training."""
+
+    metrics: list[str] = field(
+        default_factory=lambda: [
+            "train_loss",
+            "rewards/*",
+            "logps/*",
+            "aux_loss",
+            "optim/LR*",
+            "checkpoint/*",
+        ]
+    )
+    use_tqdm: bool = True
+
+    def _format_compact_metrics(self, metrics: dict[str, float]) -> str:
+        parts = [f"epoch={self.trainer.epoch}"]
+
+        if (value := metrics.get("train_loss")) is not None:
+            parts.append(f"loss={format_float(value)}")
+        if (value := metrics.get("rewards/accuracy")) is not None:
+            parts.append(f"acc={format_float(100 * value)}%")
+        if (value := metrics.get("rewards/margin")) is not None:
+            parts.append(f"margin={format_float(value)}")
+        if (value := metrics.get("rewards/chosen")) is not None:
+            parts.append(f"chosen={format_float(value)}")
+        if (value := metrics.get("rewards/rejected")) is not None:
+            parts.append(f"rejected={format_float(value)}")
+        if (value := metrics.get("aux_loss")) is not None:
+            parts.append(f"aux={format_float(value)}")
+        if (value := metrics.get("optim/LR (group 0)")) is not None:
+            parts.append(f"lr={format_float(value)}")
+
+        return " ".join(parts)
 
 
 @dataclass

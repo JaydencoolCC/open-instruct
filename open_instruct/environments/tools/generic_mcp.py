@@ -5,9 +5,9 @@ This module provides classes for connecting to any MCP server and exposing its t
 """
 
 import asyncio
+import enum
 import time
 from dataclasses import dataclass, field, replace
-from enum import StrEnum
 from typing import Any, ClassVar
 
 from mcp import ClientSession
@@ -21,6 +21,11 @@ from open_instruct.environments.base import BaseEnvConfig, EnvCall, StepResult
 from open_instruct.environments.tools.utils import Tool, coerce_args, log_env_call
 
 logger = logger_utils.setup_logger(__name__)
+try:
+    StrEnum = enum.StrEnum
+except AttributeError:
+    class StrEnum(str, enum.Enum):
+        pass
 
 
 class MCPTransport(StrEnum):

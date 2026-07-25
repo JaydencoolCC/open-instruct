@@ -84,7 +84,7 @@ def load_hf_model(
             config_dict.get("model_type") == "olmo3"
             and isinstance(config_dict.get("tie_word_embeddings"), bool)
         ):
-            config_dict["tie_word_embeddings"] = int(config_dict["tie_word_embeddings"])
+            # config_dict["tie_word_embeddings"] = int(config_dict["tie_word_embeddings"])
             from_pretrained_kwargs["config"] = Olmo3Config(**config_dict)
 
     if is_url(model_name_or_path):
