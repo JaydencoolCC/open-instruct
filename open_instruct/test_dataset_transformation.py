@@ -5,6 +5,7 @@ import os
 import shutil
 import tempfile
 import unittest
+from unittest import mock
 
 import torch
 from parameterized import parameterized
@@ -34,6 +35,50 @@ TOKENIZER_PATH = _get_tokenizer_path()
 GOLD_SFT = {"count": 100, "hash": "3e745ff9615c9b0e3d8efe74f3f96cde01ac6a720535f0b4ef7175ebb2d1d6cf"}
 GOLD_PREFERENCE = {"count": 97, "hash": "415d8c34ac25cf04d798f27a88c90df38826f71a404e5345563635778bdf9bb3"}
 GOLD_RLVR = {"count": 100, "hash": "9ebada598693087c4cd4804d474fbbe07f41a7dffb38104ddee4e93ba0bfd3b1"}
+
+
+class TestRlvrPrepare(unittest.TestCase):
+    def test_pretokenized_row_passes_through(self):
+        tokenizer = mock.Mock()
+        row = {
+            "input_ids_prompt": [10, 20, 30],
+            "prompt": "user: What is 1 + 1?",
+            "ground_truth": ["2"],
+            "dataset": ["math"],
+            "metadata": "preserved",
+        }
+
+        result = open_instruct.dataset_transformation.rlvr_prepare_v1(row, tokenizer)
+
+        self.assertEqual(result, row)
+        self.assertEqual(result["input_ids_prompt"], [10, 20, 30])
+        self.assertEqual(result["metadata"], "preserved")
+        tokenizer.apply_chat_template.assert_not_called()
+
+    def test_raw_messages_are_tokenized(self):
+        tokenizer = mock.Mock(pad_token_id=-1)
+        tokenizer.apply_chat_template.return_value = [10, 20, 30]
+        row = {
+            "messages": [{"role": "user", "content": "What is 1 + 1?"}],
+            "ground_truth": "2",
+            "dataset": "math",
+        }
+
+        result = open_instruct.dataset_transformation.rlvr_prepare_v1(row, tokenizer)
+
+        self.assertEqual(result["input_ids_prompt"], [10, 20, 30])
+        self.assertEqual(result["prompt"], "user: What is 1 + 1?")
+        self.assertEqual(result["ground_truth"], ["2"])
+        self.assertEqual(result["dataset"], ["math"])
+        self.assertNotIn("messages", result)
+        tokenizer.apply_chat_template.assert_called_once()
+
+    def test_invalid_pretokenized_row_reports_missing_columns(self):
+        with self.assertRaisesRegex(ValueError, "input_ids_prompt"):
+            open_instruct.dataset_transformation.rlvr_prepare_v1(
+                {"prompt": "user: What is 1 + 1?", "ground_truth": ["2"], "dataset": ["math"]},
+                mock.Mock(),
+            )
 
 
 class TestEnvConfigNormalization(unittest.TestCase):

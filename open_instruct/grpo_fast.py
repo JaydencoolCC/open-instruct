@@ -75,6 +75,7 @@ from ray.util import queue as ray_queue
 from ray.util.placement_group import PlacementGroup, placement_group
 from ray.util.scheduling_strategies import PlacementGroupSchedulingStrategy
 from rich.pretty import pprint
+from tqdm.auto import tqdm
 from transformers import AutoModelForCausalLM, PreTrainedModel, PreTrainedTokenizer, get_scheduler
 from transformers.integrations import HfDeepSpeedConfig
 from vllm.distributed.weight_transfer.base import WeightTransferInitRequest
@@ -103,7 +104,6 @@ from open_instruct.model_utils import (
     disable_dropout_in_model,
     get_olmo3_generation_config,
     load_ref_policy,
-    print_rich_single_line_metrics,
     push_folder_to_hub,
 )
 from open_instruct.rl_utils import Timer, masked_mean
@@ -160,7 +160,7 @@ CHECKPOINT_COMPLETE_MARKER = ".checkpoint_complete"
 WEIGHT_SYNC_TIMEOUT_S = 120.0
 CLUSTER_STARTUP_TIMEOUT_S = 1200.0
 PLACEMENT_GROUP_READY_TIMEOUT_S = 300.0
-LEARNER_ACTOR_NUM_CPUS = 4
+LEARNER_ACTOR_NUM_CPUS = grpo_fast_resource_plan.LEARNER_PLACEMENT_GROUP_CPU_PER_GPU
 EXCLUDED_ENV_VARS = {"CUDA_VISIBLE_DEVICES", "ROCR_VISIBLE_DEVICES"}
 
 
@@ -1517,6 +1517,27 @@ def weight_sync_thread(
     logger.info("[Weight Sync Thread] 🛑 Stopping weight sync thread")
 
 
+def build_training_progress_postfix(metrics: dict[str, float | int]) -> dict[str, str]:
+    """Select and format the most useful per-step metrics for the training progress bar."""
+    metric_keys = {
+        "loss": "loss/total_avg",
+        "policy": "loss/policy_avg",
+        "reward": "objective/verifiable_reward",
+        "entropy": "policy/entropy_avg",
+        "kl": "loss/kl_avg",
+        "grad": "optim/grad_norm",
+        "lr": "lr",
+        "step_s": "time/total",
+    }
+    postfix = {}
+    for label, key in metric_keys.items():
+        if key not in metrics:
+            continue
+        value = float(metrics[key])
+        postfix[label] = f"{value:.2e}" if key == "lr" else f"{value:.4f}"
+    return postfix
+
+
 def one_training_step(
     args: grpo_utils.GRPOExperimentConfig,
     streaming_config: data_loader_lib.StreamingDataLoaderConfig,
@@ -1534,13 +1555,14 @@ def one_training_step(
     chat_template_name: str,
     model_dims: utils.ModelDims,
     actor_manager: ActorManager | None = None,
-) -> int:
-    """Train the model for one step. Returns the number of tokens processed."""
+) -> tuple[int, dict[str, float | int]]:
+    """Train the model for one step and return its token count and scalar metrics."""
     update_ref_policy_future = []
     with Timer("[Main Thread] 🗡️ Training") as train_timer:
         results, _ = ray_get_with_progress(
             [policy_group.models[i].step.remote() for i in range(args.world_size)],
             desc=f"Running training step {training_step}",
+            enable=args.verbose,
         )
         metrics, array_metrics = zip(*results)
         if (
@@ -1630,9 +1652,7 @@ def one_training_step(
         **average_metrics,
         **utilization_metrics,
     }
-    # Print only scalar metrics
     scalar_metrics = {k: v for k, v in metrics.items() if isinstance(v, float | int)}
-    print_rich_single_line_metrics(scalar_metrics)
 
     if args.with_tracking:
         # Convert evolving rubric table data to wandb.Table
@@ -1648,7 +1668,7 @@ def one_training_step(
                 metrics_to_log[key] = value
         wandb.log(metrics_to_log, step=training_step)
 
-    return num_step_tokens
+    return num_step_tokens, scalar_metrics
 
 
 @backoff.on_exception(backoff.expo, Exception, max_tries=3)
@@ -1927,6 +1947,13 @@ def run_training(
     )
     weight_sync_thread_future, weight_sync_trigger = initialize_weight_sync(resume_training_step)
 
+    training_progress = tqdm(
+        total=args.num_training_steps,
+        initial=resume_training_step - 1,
+        desc="Training",
+        unit="step",
+        dynamic_ncols=True,
+    )
     for training_step in range(resume_training_step, args.num_training_steps + 1):
         start_time = time.perf_counter()
 
@@ -1969,7 +1996,7 @@ def run_training(
 
         data_thread_metrics["time/health_check"] = health_check_time
 
-        num_step_tokens = one_training_step(
+        num_step_tokens, step_metrics = one_training_step(
             args,
             streaming_config,
             vllm_config,
@@ -1988,6 +2015,8 @@ def run_training(
             actor_manager,
         )
         num_total_tokens += num_step_tokens
+        training_progress.set_postfix(build_training_progress_postfix(step_metrics), refresh=False)
+        training_progress.update(1)
 
         # Checkpoint after one_training_step (or even if it was skipped)
         # This ensures we checkpoint progress even if the exact checkpoint step has no data
@@ -2045,6 +2074,7 @@ def run_training(
             start_time=training_start_time,
             wandb_url=wandb_url,
         )
+    training_progress.close()
 
     if resume_training_step > args.num_training_steps:
         raise ValueError(f"Training didn't run since {resume_training_step=} > {args.num_training_steps=}")

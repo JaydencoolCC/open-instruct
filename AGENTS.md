@@ -1,1 +1,1 @@
-conda environment: /data/home/zhanghx/.conda/envs/olmo3_sft
+conda environment: /home/zhanghx/.conda/envs/olmo_rl

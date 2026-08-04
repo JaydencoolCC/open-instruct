@@ -1504,6 +1504,53 @@ def rlvr_tokenize_v3(
     return row
 
 
+def rlvr_prepare_v1(
+    row: dict[str, Any],
+    tokenizer: PreTrainedTokenizer,
+    sft_messages_key: str = DEFAULT_SFT_MESSAGES_KEY,
+    ground_truths_key: str = GROUND_TRUTHS_KEY,
+    verifier_source_key: str = VERIFIER_SOURCE_KEY,
+    system_prompt_override: str | None = None,
+    tool_definitions: list[dict[str, Any]] | None = None,
+    pass_tools_to_chat_template: bool = True,
+):
+    """Tokenize raw RLVR rows or validate rows that already contain prompt token IDs."""
+    if sft_messages_key in row:
+        return rlvr_tokenize_v3(
+            row,
+            tokenizer,
+            sft_messages_key=sft_messages_key,
+            ground_truths_key=ground_truths_key,
+            verifier_source_key=verifier_source_key,
+            system_prompt_override=system_prompt_override,
+            tool_definitions=tool_definitions,
+            pass_tools_to_chat_template=pass_tools_to_chat_template,
+        )
+
+    required_columns = {INPUT_IDS_PROMPT_KEY, RAW_PROMPT_KEY, ground_truths_key, verifier_source_key}
+    missing_columns = required_columns - row.keys()
+    if missing_columns:
+        raise ValueError(
+            f"RLVR row has neither '{sft_messages_key}' nor all required pretokenized columns. "
+            f"Missing: {sorted(missing_columns)}"
+        )
+    if system_prompt_override:
+        raise ValueError("Cannot apply a system prompt override to pretokenized RLVR data")
+    if pass_tools_to_chat_template and tool_definitions:
+        raise ValueError("Cannot inject tools into pretokenized RLVR data")
+    if not row[INPUT_IDS_PROMPT_KEY]:
+        raise ValueError("Pretokenized RLVR row has empty input_ids_prompt")
+
+    ground_truths_val = row[ground_truths_key]
+    verifier_source_val = row[verifier_source_key]
+    if isinstance(verifier_source_val, str):
+        verifier_source_val = [verifier_source_val]
+        ground_truths_val = [ground_truths_val]
+    row[GROUND_TRUTHS_KEY] = ground_truths_val
+    row[VERIFIER_SOURCE_KEY] = verifier_source_val
+    return row
+
+
 def rlvr_filter_v1(
     row: dict[str, Any],
     tokenizer: PreTrainedTokenizer,
@@ -1542,6 +1589,7 @@ TRANSFORM_FNS = {
     "preference_tulu_tokenize_and_truncate_v1": (preference_tulu_tokenize_and_truncate_v1_2, "map"),
     "preference_tulu_filter_v1": (preference_tulu_filter_v1, "filter"),
     "rlvr_tokenize_v1": (rlvr_tokenize_v3, "map"),
+    "rlvr_prepare_v1": (rlvr_prepare_v1, "map"),
     "rlvr_max_length_filter_v1": (rlvr_max_length_filter_v2, "filter"),
 }
 
