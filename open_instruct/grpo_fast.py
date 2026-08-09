@@ -2094,7 +2094,10 @@ def _discover_tools_from_datasets(dataset_mixer_list: list[str], dataset_mixer_l
     for i in range(0, len(dataset_mixer_list), 2):
         dataset_name = dataset_mixer_list[i]
         split = splits[i // 2]
-        ds = datasets.load_dataset(dataset_name, split=split)
+        if os.path.isdir(dataset_name):
+            ds = datasets.load_from_disk(dataset_name)
+        else:
+            ds = datasets.load_dataset(dataset_name, split=split)
         if TOOLS_COLUMN_KEY in ds.column_names:
             for tools in ds[TOOLS_COLUMN_KEY]:
                 if tools:

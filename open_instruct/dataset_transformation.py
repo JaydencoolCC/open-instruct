@@ -1655,8 +1655,10 @@ class DatasetConfig:
     dataset: Dataset = field(init=False)
 
     def __post_init__(self):
-        # if the file exists locally, use the local file
-        if os.path.exists(self.dataset_name) and self.dataset_name.endswith(".jsonl"):
+        # If the path exists locally, load it according to its storage format.
+        if os.path.isdir(self.dataset_name):
+            dataset = Dataset.load_from_disk(self.dataset_name)
+        elif os.path.exists(self.dataset_name) and self.dataset_name.endswith(".jsonl"):
             assert self.dataset_split == "train", "Only train split is supported for local jsonl files."
             dataset = load_dataset(
                 "json", data_files=self.dataset_name, split=self.dataset_split, num_proc=max_num_processes()

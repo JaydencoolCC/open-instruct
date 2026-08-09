@@ -26,6 +26,16 @@ from open_instruct import logger_utils
 
 logger = logger_utils.setup_logger(__name__)
 
+LITELLM_MODEL_PREFIXES = ("hosted_vllm/", "openai/")
+
+
+def _get_huggingface_tokenizer_name(model_name: str) -> str:
+    """Remove a LiteLLM provider prefix from a Hugging Face model ID."""
+    for prefix in LITELLM_MODEL_PREFIXES:
+        if model_name.startswith(prefix):
+            return model_name.removeprefix(prefix)
+    return model_name
+
 
 def get_encoding_for_model(model_name: str):
     """
@@ -94,7 +104,7 @@ def check_context_window_limit(
     """
     try:
         # First try to load the actual model tokenizer from HuggingFace
-        tokenizer = AutoTokenizer.from_pretrained(model_name.replace("hosted_vllm/", ""))
+        tokenizer = AutoTokenizer.from_pretrained(_get_huggingface_tokenizer_name(model_name))
         max_context_length = tokenizer.model_max_length if max_context_length is None else max_context_length
 
         # Count tokens in all messages using HuggingFace tokenizer
@@ -190,7 +200,7 @@ def truncate_messages_to_fit_context(
     """
     try:
         # First try to load the actual model tokenizer from HuggingFace
-        tokenizer = AutoTokenizer.from_pretrained(model_name.replace("hosted_vllm/", ""))
+        tokenizer = AutoTokenizer.from_pretrained(_get_huggingface_tokenizer_name(model_name))
         max_context_length = tokenizer.model_max_length if max_context_length is None else max_context_length
 
         # Calculate available tokens for messages

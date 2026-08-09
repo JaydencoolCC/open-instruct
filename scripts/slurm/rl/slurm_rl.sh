@@ -44,7 +44,8 @@ OUTPUT_ROOT="${PROJECT_ROOT}/checkpoints/rl"
 LOCAL_CACHE_DIR="${PROJECT_ROOT}/data/open_instruct_dataset_cache"
 ROLLOUTS_SAVE_PATH="${PROJECT_ROOT}/data/rollouts"
 
-DATASET_MIX="allenai/Dolci-Instruct-RL 1.0"
+# DATASET_MIX="allenai/Dolci-Instruct-RL 0.9"
+DATASET_MIX="/home/zhanghx/benchmark/datasets/Dolci-Instruct-RL/dolci_instruct_rl_train 1.0"
 
 export OPENAI_API_KEY="sk-nmvodepbsrnyeuqcefmsqqodvpoyjsruenchwstajeknozuy"
 export OPENAI_API_BASE="https://api.siliconflow.cn/v1"
@@ -65,7 +66,7 @@ VLLM_TENSOR_PARALLEL_SIZE="1"
 VLLM_GPU_MEMORY_UTILIZATION="0.9"
 DEEPSPEED_STAGE="3"
 LR="1e-6"
-SEED="1"
+SEED="42"
 VLLM_TOTAL_GPUS=$((VLLM_NUM_ENGINES * VLLM_TENSOR_PARALLEL_SIZE))
 NUM_LEARNER_GPUS=$((NUM_GPUS - VLLM_TOTAL_GPUS))
 MIN_RAY_CPUS=$((NUM_LEARNER_GPUS * 4 + VLLM_TOTAL_GPUS + 3))
@@ -74,7 +75,7 @@ EXP_NAME="olmo3-7b-GRPO-${TIMESTAMP}"
 CHECKPOINT_STATE_DIR="${OUTPUT_ROOT}/checkpoint_states/${EXP_NAME}"
 WANDB_ENTITY="jaycool"
 WANDB_PROJECT="Olmo3-7B-rl"
-export WANDB_API_KEY="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"
+
 export WANDB_INIT_TIMEOUT="300"
 
 mkdir -p "$OUTPUT_ROOT" "$LOCAL_CACHE_DIR" "$ROLLOUTS_SAVE_PATH" "$TRITON_CACHE_DIR" logs

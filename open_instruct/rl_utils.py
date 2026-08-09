@@ -32,7 +32,9 @@ class RolloutRecord:
     step: int
     sample_idx: int
     prompt_idx: int
+    dataset_index: int | None
     prompt_tokens: list[int]
+    raw_query: str | None
     response_tokens: list[int]
     reward: float
     advantage: float
@@ -109,7 +111,9 @@ def _save_rollouts(
                     step=step,
                     sample_idx=i,
                     prompt_idx=i // num_samples_per_prompt,
+                    dataset_index=batch.indices[i] if batch.indices is not None else None,
                     prompt_tokens=batch.queries[i],
+                    raw_query=batch.raw_queries[i] if batch.raw_queries is not None else None,
                     response_tokens=result.responses[i],
                     reward=float(batch.scores[i]),
                     advantage=float(advantages[i]),
