@@ -47,7 +47,7 @@ ROLLOUTS_SAVE_PATH="${PROJECT_ROOT}/data/rollouts"
 # DATASET_MIX="allenai/Dolci-Instruct-RL 0.9"
 DATASET_MIX="/home/zhanghx/benchmark/datasets/Dolci-Instruct-RL/dolci_instruct_rl_train 1.0"
 
-export OPENAI_API_KEY="sk-nmvodepbsrnyeuqcefmsqqodvpoyjsruenchwstajeknozuy"
+
 export OPENAI_API_BASE="https://api.siliconflow.cn/v1"
 export OPENAI_BASE_URL="https://api.siliconflow.cn/v1"
 # LLM_JUDGE_MODEL="deepseek-ai/DeepSeek-V3.2"
