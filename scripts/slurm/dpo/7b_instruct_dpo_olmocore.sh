@@ -15,7 +15,7 @@ set -euo pipefail
 
 echo "=== 开始加载环境 ==="
 source /data/softwares/miniconda3/26.3.2-2/etc/profile.d/conda.sh
-conda activate /data/home/zhanghx/.conda/envs/olmo3_sft
+conda activate /data/home/zhanghx/.conda/envs/olmo3_opd
 
 echo "当前 Python: $(which python)"
 echo "PyTorch 路径: $(python -c 'import torch; print(torch.__file__)')"

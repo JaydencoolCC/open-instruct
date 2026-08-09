@@ -8,7 +8,8 @@ np.random.RandomState(seed).choice(..., replace=False).
 This script starts from the exact complement of the training indices. It then
 removes any held-out rows whose full raw content already appears in the training
 indices, because the source dataset can contain duplicate rows at different
-indices.
+indices. Finally, it samples the same number of rows from the training indices
+and saves them as members for comparison with the held-out test rows.
 """
 
 import argparse
@@ -22,8 +23,9 @@ from datasets import Dataset, load_dataset
 
 
 DEFAULT_DATASET_NAME = "allenai/Dolci-Instruct-DPO"
-DEFAULT_OUTPUT_DIR = Path("/data/home/zhanghx/olmo3/dataset/benchmark")
+DEFAULT_OUTPUT_DIR = Path("/data/home/zhanghx/olmo3/dataset/benchmark/dpo")
 DEFAULT_OUTPUT_NAME = "dolci_instruct_dpo_test_0p01.jsonl"
+DEFAULT_MEMBERS_OUTPUT_NAME = "dolci_instruct_dpo_train_0p01.jsonl"
 DEFAULT_REVISION = "main"
 DEFAULT_SEED = 42
 DEFAULT_SPLIT = "train"
@@ -100,6 +102,12 @@ def _remove_content_overlaps(
     return filtered_test_indices, removed_count, len(content_overlap_hashes)
 
 
+def _sample_member_indices(train_indices: list[int], member_size: int, seed: int) -> list[int]:
+    if member_size > len(train_indices):
+        raise ValueError(f"Cannot sample {member_size} members from {len(train_indices)} training rows")
+    return np.random.RandomState(seed).choice(train_indices, size=member_size, replace=False).tolist()
+
+
 def _metadata(
     *,
     dataset_name: str,
@@ -112,6 +120,8 @@ def _metadata(
     candidate_test_indices: list[int],
     test_indices: list[int],
     output_path: Path,
+    member_indices: list[int],
+    members_output_path: Path,
     content_overlap_row_count: int,
     content_overlap_unique_count: int,
 ) -> dict[str, Any]:
@@ -134,11 +144,15 @@ def _metadata(
         "candidate_test_indices_sha256": _sha256_ints(candidate_test_indices),
         "test_indices_sha256": _sha256_ints(test_indices),
         "output_path": str(output_path),
+        "member_size": len(member_indices),
+        "member_indices_sha256": _sha256_ints(member_indices),
+        "members_output_path": str(members_output_path),
         "selection_note": (
             "Candidate test indices are the exact complement of the training indices produced by "
             "np.random.RandomState(seed).choice(dataset_size, size=int(train_fraction * dataset_size), "
             "replace=False). Final test indices remove any candidate rows whose full raw content hash "
-            "also appears in the training indices."
+            "also appears in the training indices. Members are sampled without replacement from the "
+            "training indices, with the same seed and the same size as the final test set."
         ),
     }
 
@@ -154,6 +168,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--seed", type=int, default=DEFAULT_SEED)
     parser.add_argument("--output_dir", type=Path, default=DEFAULT_OUTPUT_DIR)
     parser.add_argument("--output_name", default=DEFAULT_OUTPUT_NAME)
+    parser.add_argument("--members_output_name", default=DEFAULT_MEMBERS_OUTPUT_NAME)
     parser.add_argument("--overwrite", action="store_true")
     return parser.parse_args()
 
@@ -161,12 +176,14 @@ def parse_args() -> argparse.Namespace:
 def main() -> None:
     args = parse_args()
     output_path = args.output_dir / args.output_name
+    members_output_path = args.output_dir / args.members_output_name
     meta_path = output_path.with_suffix(".meta.json")
+    if members_output_path in (output_path, meta_path):
+        raise ValueError("Members output path must differ from the test and metadata output paths")
 
-    if output_path.exists() and not args.overwrite:
-        raise FileExistsError(f"{output_path} already exists. Pass --overwrite to replace it.")
-    if meta_path.exists() and not args.overwrite:
-        raise FileExistsError(f"{meta_path} already exists. Pass --overwrite to replace it.")
+    for path in (output_path, members_output_path, meta_path):
+        if path.exists() and not args.overwrite:
+            raise FileExistsError(f"{path} already exists. Pass --overwrite to replace it.")
 
     dataset = load_dataset(args.dataset_name, split=args.split, revision=args.revision)
     if not isinstance(dataset, Dataset):
@@ -176,10 +193,20 @@ def main() -> None:
     test_indices, content_overlap_row_count, content_overlap_unique_count = _remove_content_overlaps(
         dataset, train_indices, candidate_test_indices
     )
+    member_indices = _sample_member_indices(train_indices, len(test_indices), args.seed)
+    assert len(member_indices) == len(test_indices)
+    assert not set(member_indices).intersection(test_indices)
+
     test_dataset = dataset.select(test_indices)
+    members_dataset = dataset.select(member_indices)
     _write_jsonl(test_dataset, output_path)
+    _write_jsonl(members_dataset, members_output_path)
     written_rows = sum(1 for _ in output_path.open(encoding="utf-8"))
+    written_member_rows = sum(1 for _ in members_output_path.open(encoding="utf-8"))
     assert written_rows == len(test_indices), f"Expected {len(test_indices)} JSONL rows, wrote {written_rows}"
+    assert written_member_rows == len(member_indices), (
+        f"Expected {len(member_indices)} members JSONL rows, wrote {written_member_rows}"
+    )
 
     metadata = _metadata(
         dataset_name=args.dataset_name,
@@ -192,19 +219,24 @@ def main() -> None:
         candidate_test_indices=candidate_test_indices,
         test_indices=test_indices,
         output_path=output_path,
+        member_indices=member_indices,
+        members_output_path=members_output_path,
         content_overlap_row_count=content_overlap_row_count,
         content_overlap_unique_count=content_overlap_unique_count,
     )
     metadata["jsonl_rows"] = written_rows
+    metadata["members_jsonl_rows"] = written_member_rows
     meta_path.write_text(json.dumps(metadata, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
     print(f"Dataset: {args.dataset_name}/{args.split}@{args.revision}")
     print(f"Train size: {len(train_indices)}")
     print(f"Candidate test size: {len(candidate_test_indices)}")
     print(f"Test size: {len(test_indices)}")
+    print(f"Member size: {len(member_indices)}")
     print(f"Overlap count: {metadata['overlap_count']}")
     print(f"Removed content-overlap rows: {content_overlap_row_count}")
     print(f"Saved JSONL: {output_path}")
+    print(f"Saved members JSONL: {members_output_path}")
     print(f"Saved metadata: {meta_path}")
 
 
