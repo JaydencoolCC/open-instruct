@@ -1,4 +1,5 @@
 import logging
+import math
 import time
 from dataclasses import dataclass, field
 from functools import cache
@@ -39,6 +40,14 @@ if TYPE_CHECKING:
     from ..trainer import Trainer
 
 log = logging.getLogger(__name__)
+
+
+def _eval_duration_from_fraction(eval_fraction: float, total_batches: int) -> Duration:
+    if not 0.0 < eval_fraction <= 1.0:
+        raise OLMoConfigurationError(
+            f"'eval_fraction' must be in the range (0, 1], got {eval_fraction}"
+        )
+    return Duration.steps(max(1, math.ceil(total_batches * eval_fraction)))
 
 
 @dataclass
@@ -226,6 +235,11 @@ class LMEvaluatorCallbackConfig(CallbackConfig):
     eval_on_finish: bool = False
     cancel_after_first_eval: bool = False
     eval_duration: Duration = field(default_factory=lambda: Duration.epochs(1))
+    eval_fraction: Optional[float] = None
+    """
+    The deterministic fraction of evaluation batches to run. When set, this overrides
+    :data:`eval_duration`.
+    """
     log_interval: int = 5
     deterministic: bool = True
     enabled: bool = True
@@ -285,6 +299,14 @@ class LMEvaluatorCallbackConfig(CallbackConfig):
             dp_process_group=trainer.dp_process_group,
             deterministic=self.deterministic,
         )
+        eval_duration = self.eval_duration
+        if self.eval_fraction is not None:
+            total_batches = evaluator.total_batches
+            if total_batches is None:
+                raise OLMoConfigurationError(
+                    "'eval_fraction' requires an evaluator with a known number of batches"
+                )
+            eval_duration = _eval_duration_from_fraction(self.eval_fraction, total_batches)
         return EvaluatorCallback(
             evaluators=[evaluator],
             eval_interval=self.eval_interval,
@@ -292,7 +314,7 @@ class LMEvaluatorCallbackConfig(CallbackConfig):
             log_interval=self.log_interval,
             eval_on_startup=self.eval_on_startup,
             cancel_after_first_eval=self.cancel_after_first_eval,
-            eval_duration=self.eval_duration,
+            eval_duration=eval_duration,
             eval_on_finish=self.eval_on_finish,
         )
 

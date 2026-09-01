@@ -20,6 +20,7 @@ from olmo_core.config import Config, DType
 from olmo_core.data import (
     NumpyDataLoaderConfig,
     NumpyPackedFSLDatasetConfig,
+    NumpyPaddedFSLDatasetConfig,
     TokenizerConfig,
 )
 from olmo_core.data.types import LongDocStrategy
@@ -51,6 +52,7 @@ from olmo_core.train.callbacks import (
     ConsoleLoggerCallback,
     GarbageCollectorCallback,
     GPUMemoryMonitorCallback,
+    LMEvaluatorCallbackConfig,
 )
 from olmo_core.train.callbacks.wandb import WandBCallback
 from olmo_core.train.checkpoint import CheckpointerConfig
@@ -225,6 +227,25 @@ def build_sft_dataset(
     return dataset
 
 
+def build_sft_eval_dataset(
+    root_dir: str,
+    tokenizer_config: TokenizerConfig,
+    sequence_length: int,
+    dataset_path: str,
+) -> NumpyPaddedFSLDatasetConfig:
+    clean_path = dataset_path.rstrip("/")
+    return NumpyPaddedFSLDatasetConfig(
+        tokenizer=tokenizer_config,
+        work_dir=get_work_dir(root_dir),
+        paths=[f"{clean_path}/token_ids_part_*.npy"],
+        expand_glob=True,
+        label_mask_paths=[f"{clean_path}/labels_mask_*.npy"],
+        metadata=[{"label": "validation"}],
+        sequence_length=sequence_length,
+        generate_doc_lengths=True,
+    )
+
+
 @dataclass
 class SFTConfig(Config):
     """
@@ -264,6 +285,9 @@ class SFTConfig(Config):
         build_launch: bool = False,
         init_seed: int = 33333,
         dataset_path: str,
+        eval_dataset_path: Optional[str] = None,
+        eval_interval: int = 1000,
+        eval_fraction: float = 1.0,
     ) -> "SFTConfig":
         root_dir = "."
         user_name = "local"
@@ -348,6 +372,15 @@ class SFTConfig(Config):
                     f"--budget={budget}",
                     f"--workspace={workspace}",
                     f"--dataset_path={dataset_path}",
+                    *(
+                        [
+                            f"--eval_dataset_path={eval_dataset_path}",
+                            f"--eval_interval={eval_interval}",
+                            f"--eval_fraction={eval_fraction}",
+                        ]
+                        if eval_dataset_path is not None
+                        else []
+                    ),
                     *overrides,
                 ],
                 cluster=cluster,
@@ -417,6 +450,23 @@ class SFTConfig(Config):
             ),
             init_seed=init_seed,
         ).merge(overrides)
+
+        if eval_dataset_path is not None:
+            config.trainer = config.trainer.with_callback(
+                "lm_evaluator",
+                LMEvaluatorCallbackConfig(
+                    eval_dataset=build_sft_eval_dataset(
+                        root_dir=root_dir,
+                        tokenizer_config=tokenizer_config,
+                        sequence_length=seq_len,
+                        dataset_path=eval_dataset_path,
+                    ),
+                    eval_interval=eval_interval,
+                    eval_on_finish=True,
+                    eval_fraction=eval_fraction,
+                    deterministic=True,
+                ),
+            )
 
         config.dataset = dataset_config
 
@@ -540,6 +590,15 @@ Examples:
     parser.add_argument("--budget", help="The beaker budget to use.")
     parser.add_argument("--workspace", help="The workspace to run in.")
     parser.add_argument("--dataset_path", help="The path to the pre-tokenized SFT dataset.")
+    parser.add_argument(
+        "--eval_dataset_path", help="The path to the pre-tokenized SFT evaluation dataset."
+    )
+    parser.add_argument(
+        "--eval_interval", type=int, default=1000, help="Run evaluation every N training steps."
+    )
+    parser.add_argument(
+        "--eval_fraction", type=float, default=1.0, help="Fraction of evaluation batches to run."
+    )
 
     # Parse known args to get positional arguments and cmd
     args, overrides = parser.parse_known_args()
@@ -568,6 +627,9 @@ Examples:
         workspace=args.workspace,
         build_launch=args.cmd == "launch",
         dataset_path=args.dataset_path,
+        eval_dataset_path=args.eval_dataset_path,
+        eval_interval=args.eval_interval,
+        eval_fraction=args.eval_fraction,
     )
 
     # Print the config for debugging and then execute the command.

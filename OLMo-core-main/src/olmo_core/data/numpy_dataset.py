@@ -858,6 +858,7 @@ class NumpyPaddedFSLDataset(NumpyFSLDataset):
         bos_token_id: Optional[int] = None,
         metadata: Optional[Union[List[Dict[str, Any]], Dict[str, Any]]] = None,
         include_instance_metadata: Optional[bool] = None,
+        generate_doc_lengths: bool = False,
         instance_filter_config: Optional[InstanceFilterConfig] = None,
         label_mask_paths: Optional[List[PathOrStr]] = None,
     ):
@@ -870,6 +871,7 @@ class NumpyPaddedFSLDataset(NumpyFSLDataset):
             dtype=dtype,
             metadata=metadata,
             include_instance_metadata=include_instance_metadata,
+            generate_doc_lengths=generate_doc_lengths,
             bos_token_id=bos_token_id,
             instance_filter_config=instance_filter_config,
             label_mask_paths=label_mask_paths,
@@ -927,6 +929,10 @@ class NumpyPaddedFSLDataset(NumpyFSLDataset):
                 torch.ones_like(item["input_ids"], dtype=torch.bool), pad_shape, value=False
             )
         item["input_ids"] = F.pad(item["input_ids"], pad_shape, value=self.pad_token_id)
+        if self._generate_doc_lengths:
+            item["doc_lens"] = get_document_lengths(
+                item["input_ids"], self.eos_token_id, bos_token_id=self.bos_token_id
+            )
         return item
 
     def _read_chunk_from_array(self, path: PathOrStr, index: int, dtype=None) -> torch.Tensor:
@@ -2630,6 +2636,10 @@ class NumpyPaddedFSLDatasetConfig(NumpyDatasetConfig):
     """
     The paths/URLs to numpy bool files indicating which tokens should be masked.
     """
+    generate_doc_lengths: bool = False
+    """
+    Include individual document lengths in the padded instances.
+    """
 
     def validate(self):
         if self.sequence_length <= 0:
@@ -2650,6 +2660,7 @@ class NumpyPaddedFSLDatasetConfig(NumpyDatasetConfig):
             bos_token_id=self.tokenizer.bos_token_id,
             metadata=metadata,
             include_instance_metadata=self.include_instance_metadata,
+            generate_doc_lengths=self.generate_doc_lengths,
             instance_filter_config=self.instance_filter_config,
             label_mask_paths=label_masks,
         )

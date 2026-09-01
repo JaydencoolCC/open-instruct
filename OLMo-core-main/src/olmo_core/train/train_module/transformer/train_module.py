@@ -16,7 +16,7 @@ from torch.distributed.tensor import DTensor
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.optim import Optimizer
 
-from olmo_core.data.utils import get_labels, split_batch
+from olmo_core.data.utils import get_cumulative_document_lengths, get_labels, split_batch
 from olmo_core.distributed.checkpoint import (
     merge_state_dicts,
     prune_state_dict,
@@ -482,16 +482,29 @@ class TransformerTrainModule(TrainModule):
 
         input_ids, labels, model_kwargs = self._prepare_batch(batch, labels)
 
+        if self.cp_enabled and "doc_lens" in model_kwargs:
+            # Llama3's document-aware CP load balancer requires document lengths on CPU.
+            model_kwargs["doc_lens"] = model_kwargs["doc_lens"].cpu()
+
         # When using CP/TP, shard the label_mask along the sequence dimension to match the
         # sharded ce_loss output shape. CP shards first (S -> S/CP), then TP shards further
         # (S/CP -> S/(CP*TP)).
         if self.cp_enabled and "label_mask" in model_kwargs:
             assert self.model._cp_load_balancer is not None
-            (label_mask,) = self.model._cp_load_balancer.batch_shard(
-                inputs=[model_kwargs["label_mask"]],
-                seq_dims=[1],
-                pad_values=[0],
-            )
+            if "doc_lens" in model_kwargs and "max_doc_lens" in model_kwargs:
+                (label_mask,), _ = self.model._cp_load_balancer.batch_shard_by_document(
+                    inputs=[model_kwargs["label_mask"]],
+                    seq_dims=[1],
+                    cu_doc_lens=get_cumulative_document_lengths(model_kwargs["doc_lens"]),
+                    pad_values=[0],
+                    length_multiple=16,
+                )
+            else:
+                (label_mask,) = self.model._cp_load_balancer.batch_shard(
+                    inputs=[model_kwargs["label_mask"]],
+                    seq_dims=[1],
+                    pad_values=[0],
+                )
             model_kwargs["label_mask"] = label_mask.to(torch.bool)
 
         if self.tp_enabled and "label_mask" in model_kwargs:
