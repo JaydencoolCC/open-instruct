@@ -1,34 +1,38 @@
 #!/usr/bin/env bash
-#SBATCH --partition=A100
+#SBATCH --partition=wei_gpu
 #SBATCH --job-name=train-dolci-instruct
-#SBATCH --nodes=1
-#SBATCH --gpus=8
+#SBATCH --nodes=2
+#SBATCH --gpus-per-node=8
 #SBATCH --time=96:00:00
 #SBATCH --output=logs/%j.%x.out
 #SBATCH --error=logs/%j.%x.err
-#SBATCH --mem=256G                        # 内存
-#SBATCH --cpus-per-task=64               # 每任务 8 个 CPU 核
+#SBATCH --mem=256G
+#SBATCH --cpus-per-task=64
 
 set -euo pipefail
 
-
 # =================== 环境加载 ===================
 echo "=== 开始加载环境 ==="
-source /data/softwares/miniconda3/26.3.2-2/etc/profile.d/conda.sh
-conda activate /data/home/zhanghx/.conda/envs/olmo3_sft
+source /home/software/miniconda3/etc/profile.d/conda.sh
+conda activate /home/zhanghx/.conda/envs/olmo_sft
 
 echo "当前 Python: $(which python)"
 echo "PyTorch 路径: $(python -c 'import torch; print(torch.__file__)')"
 
 export HF_ENDPOINT=https://hf-mirror.com
 export PYTHONUNBUFFERED=1
-
+export LD_LIBRARY_PATH="$CONDA_PREFIX/lib/python3.12/site-packages/nvidia/cu13/lib:${LD_LIBRARY_PATH:-}"
 # Path configuration.
-PROJECT_ROOT="/data/home/zhanghx/code/open-instruct"
+PROJECT_ROOT="/home/zhanghx/code/open-instruct"
+if [[ -f "${PROJECT_ROOT}/.env" ]]; then
+    set -a
+    source "${PROJECT_ROOT}/.env"
+    set +a
+fi
 OLMOCORE_PATH="${PROJECT_ROOT}/OLMo-core-main"
-DATASET_PATH="${PROJECT_ROOT}/data/sft/dolci_instruct_sft_tokenized_split/train"
-EVAL_DATASET_PATH="${PROJECT_ROOT}/data/sft/dolci_instruct_sft_tokenized_split/test"
-BASE_CKPT="/data/common/LLMs/allenai/Olmo-3-1025-7B"
+DATASET_PATH="${PROJECT_ROOT}/data/sft/dolci_instruct_sft_tokenized_1000/train"
+EVAL_DATASET_PATH="${PROJECT_ROOT}/data/sft/dolci_instruct_sft_tokenized_fixed_parts/nonmember"
+BASE_CKPT="/home/zhanghx/models/allenai/Olmo-3-1025-7B"
 SFT_SCRIPT="${OLMOCORE_PATH}/src/scripts/train/sft/Olmo-3-7B-SFT.py"
 
 if [[ ! -f "$SFT_SCRIPT" ]]; then
@@ -40,16 +44,16 @@ fi
 export PYTHONPATH="${OLMOCORE_PATH}/src:${PYTHONPATH:-}"
 
 # Instruct SFT defaults (from OLMo-3 paper Table 47)
-RUN_NAME="dolci-instruct-sft-contamination-A100-20260811_120910"
+RUN_NAME="dolci-instruct-sft-contamination-size-1k"
 GPUS=8
 LEARNING_RATE=8e-5  # 8e-5 for Instruct (higher than Think)
 SEQ_LEN=32768
 NUM_EPOCHS=2
-GLOBAL_BATCH_SIZE=$((SEQ_LEN * 32))  # 1 sequence per GPU.
+GLOBAL_BATCH_SIZE=$((SEQ_LEN * 16))  # 16 packed sequences per global batch.
 METRICS_COLLECT_INTERVAL=1
-SAVE_INTERVAL_STEPS=1609  # 1 epoch for the current packed Dolci Instruct train split.
+SAVE_INTERVAL_STEPS=1  # The current 1,000-example packed split yields one full batch per epoch.
 EVAL_INTERVAL_STEPS="$SAVE_INTERVAL_STEPS"
-EVAL_FRACTION=0.1
+EVAL_FRACTION=1.0
 SAVE_FOLDER="${PROJECT_ROOT}/checkpoints/sft/${RUN_NAME}"
 SKIP_EMPTY_LABEL_BATCH=False
 
@@ -57,11 +61,10 @@ SKIP_EMPTY_LABEL_BATCH=False
 WANDB_ENTITY="jaycool"
 WANDB_PROJECT="Olmo3-7B-sft"
 WANDB_ENABLED=True
-export WANDB_API_KEY="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"
 export WANDB_INIT_TIMEOUT=300
 
 # GPU memory optimization
-# export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
+export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 
 echo "=== Dolci Instruct SFT Training ==="
 echo "Job ID: ${SLURM_JOB_ID:-local}"
@@ -98,7 +101,7 @@ python -m torch.distributed.run --nproc-per-node="$GPUS" \
   "$BASE_CKPT" \
   local \
   --seq_len="$SEQ_LEN" \
-  --num_nodes=1 \
+  --num_nodes=2 \
   --gpus_per_node="$GPUS" \
   --global_batch_size="$GLOBAL_BATCH_SIZE" \
   --dataset_path="$DATASET_PATH" \

@@ -3,6 +3,7 @@ export PYTHONUNBUFFERED=1
 
 # Path configuration.
 PROJECT_ROOT="/data/home/zhanghx/code/open-instruct"
+[[ -f "${PROJECT_ROOT}/.env" ]] && source "${PROJECT_ROOT}/.env"
 OLMOCORE_PATH="${PROJECT_ROOT}/OLMo-core-main"
 DATASET_PATH="${PROJECT_ROOT}/data/dolci_instruct_sft_tokenized"
 BASE_CKPT="/data/common/LLMs/allenai/Olmo-3-1025-7B"
@@ -36,7 +37,6 @@ SKIP_EMPTY_LABEL_BATCH=True
 WANDB_ENTITY="jaycool"
 WANDB_PROJECT="Olmo3-7B-sft"
 WANDB_ENABLED=True
-export WANDB_API_KEY="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"
 export WANDB_INIT_TIMEOUT=300
 
 # # GPU memory optimization
