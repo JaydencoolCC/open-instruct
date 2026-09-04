@@ -13,8 +13,8 @@ from pathlib import Path
 import numpy as np
 
 
-DEFAULT_ROOT = Path("/home/zhanghx/code/open-instruct/data/sft/dolci_instruct_sft_tokenized_fixed_parts")
-DEFAULT_OUTPUT_ROOT = Path("/home/zhanghx/code/open-instruct/data/sft")
+DEFAULT_ROOT = Path("/data/home/zhanghx/code/open-instruct/data/sft/dolci_instruct_sft_tokenized_fixed_parts")
+DEFAULT_OUTPUT_ROOT = Path("/data/home/zhanghx/code/open-instruct/data/sft/datasize/")
 TOKEN_DTYPE = np.uint32
 
 
@@ -31,7 +31,6 @@ def load_arrays(path: Path) -> tuple[np.ndarray, np.ndarray]:
     if len(tokens) != len(labels):
         raise ValueError(f"Token/label length mismatch in {path}")
     return tokens, labels
-
 
 def read_part(path: Path) -> tuple[np.ndarray, np.ndarray, list[tuple[int, int]]]:
     part = path.stem.rsplit("_", 1)[-1]

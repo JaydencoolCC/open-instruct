@@ -29,19 +29,21 @@ echo "PyTorch 路径: $(python -c 'import torch; print(torch.__file__)')"
 #
 export HF_ENDPOINT=https://hf-mirror.com
 
-PROJECT_ROOT="$(pwd)"
-BENCHMARK_DIR="/home/zhanghx/benchmark/SFT"
+PROJECT_ROOT="/data/home/zhanghx/code/open-instruct"
 OUTPUT_DIR="$PROJECT_ROOT/data/sft/dolci_instruct_sft_tokenized_fixed_parts/"
-SPLIT_OUTPUT_DIR="$BENCHMARK_DIR"
 TOKENIZER="allenai/Olmo-3-7B-Instruct-SFT"
-MEMBER_JSONL="/home/zhanghx/benchmark/SFT/member_250.jsonl"
-NONMEMBER_JSONL="/home/zhanghx/benchmark/SFT/nonmember_250.jsonl"
+MEMBER_JSONL="/data/home/zhanghx/olmo3/dataset/benchmark/sft_v2/member_250.jsonl"
+NONMEMBER_JSONL="/data/home/zhanghx/olmo3/dataset/benchmark/sft_v2/nonmember_250.jsonl"
 SEED=42
 
 export PYTHONPATH="$PROJECT_ROOT:${PYTHONPATH:-}"
 export HF_HOME="$PROJECT_ROOT/models/huggingface"
 export HF_DATASETS_CACHE="$PROJECT_ROOT/data/huggingface"
 export HF_HUB_CACHE="$PROJECT_ROOT/models/huggingface/hub"
+
+mkdir -p "$OUTPUT_DIR"
+SPLIT_OUTPUT_DIR="$(mktemp -d "$PROJECT_ROOT/data/sft/.dolci_split.XXXXXX")"
+trap 'rm -rf "$SPLIT_OUTPUT_DIR"' EXIT
 
 echo "=== Dolci Instruct Data Preparation ==="
 echo "Job ID: ${SLURM_JOB_ID:-local}"
@@ -52,8 +54,6 @@ echo "Member benchmark: $MEMBER_JSONL"
 echo "Nonmember benchmark: $NONMEMBER_JSONL"
 echo "Seed: $SEED"
 echo "========================================"
-
-mkdir -p "$OUTPUT_DIR"
 
 cd "$PROJECT_ROOT"
 
