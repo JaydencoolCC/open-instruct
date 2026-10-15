@@ -3,7 +3,11 @@ export PYTHONUNBUFFERED=1
 
 # Path configuration.
 PROJECT_ROOT="/data/home/zhanghx/code/open-instruct"
-[[ -f "${PROJECT_ROOT}/.env" ]] && source "${PROJECT_ROOT}/.env"
+if [[ -f "${PROJECT_ROOT}/.env" ]]; then
+    set -a
+    source "${PROJECT_ROOT}/.env"
+    set +a
+fi
 OLMOCORE_PATH="${PROJECT_ROOT}/OLMo-core-main"
 DATASET_PATH="${PROJECT_ROOT}/data/dolci_instruct_sft_tokenized"
 BASE_CKPT="/data/common/LLMs/allenai/Olmo-3-1025-7B"

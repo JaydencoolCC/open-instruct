@@ -17,6 +17,7 @@ export PYTORCH_CUDA_ALLOC_CONF="expandable_segments:True"
 export TRITON_CACHE_DIR="${TRITON_CACHE_DIR:-/tmp/${USER}/triton_cache}"
 
 PROJECT_ROOT="/data/home/zhanghx/code/open-instruct"
+[[ -f "${PROJECT_ROOT}/.env" ]] && source "${PROJECT_ROOT}/.env"
 OLMOCORE_PATH="${PROJECT_ROOT}/OLMo-core-main"
 
 MODEL_NAME="/data/common/LLMs/allenai/Olmo-3-7B-Instruct-DPO"
@@ -27,7 +28,6 @@ ROLLOUTS_SAVE_PATH="${PROJECT_ROOT}/data/rollouts"
 
 DATASET_MIX="allenai/Dolci-Instruct-RL 1.0"
 
-export OPENAI_API_KEY="sk-toq5V4kfbQ0NjSUXkUpj5ZRQmJXA0EWbD2xgD1ahTeBcZASr"
 export OPENAI_API_BASE="https://www.dmxapi.cn"
 export OPENAI_BASE_URL="${OPENAI_BASE_URL:-$OPENAI_API_BASE}"
 LLM_JUDGE_MODEL="qwen3-8b"
@@ -47,7 +47,6 @@ TIMESTAMP="$(date +%Y%m%d_%H%M%S)"
 EXP_NAME="olmo3-7b-GRPO-${TIMESTAMP}"
 WANDB_ENTITY="jaycool"
 WANDB_PROJECT="Olmo3-7B-rl"
-export WANDB_API_KEY="${WANDB_API_KEY:-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}"
 export WANDB_INIT_TIMEOUT="${WANDB_INIT_TIMEOUT:-300}"
 
 if [[ -n "${SLURM_CPUS_PER_TASK:-}" && "$SLURM_CPUS_PER_TASK" -lt "$MIN_RAY_CPUS" ]]; then

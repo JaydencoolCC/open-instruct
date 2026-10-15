@@ -28,9 +28,11 @@ if [[ ! -x "$TORCHRUN" ]]; then
 fi
 
 export HF_ENDPOINT="https://hf-mirror.com"
+
 export PYTHONUNBUFFERED=1
 
 PROJECT_ROOT="/data/home/zhanghx/code/open-instruct"
+[[ -f "${PROJECT_ROOT}/.env" ]] && source "${PROJECT_ROOT}/.env"
 OLMOCORE_PATH="/data/home/zhanghx/code/open-instruct/OLMo-core-main"
 MODEL_NAME="/data/common/LLMs/allenai/Olmo-3-7B-Instruct-SFT"
 OUTPUT_ROOT="${PROJECT_ROOT}/checkpoints/dpo"
@@ -54,8 +56,6 @@ TIMESTAMP="$(date +%Y%m%d_%H%M%S)"
 EXP_NAME="olmo3-7b-DPO-olmocore-DPO-${TIMESTAMP}"
 WANDB_ENTITY="jaycool"
 WANDB_PROJECT="Olmo3-7B-dpo"
-export WANDB_API_KEY="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"
-
 mkdir -p "$OUTPUT_ROOT" "$LOCAL_CACHE_DIR" "$REFERENCE_LOGPROBS_CACHE_PATH"
 
 if [[ "$MODEL_NAME" == /* && ! -e "$MODEL_NAME" ]]; then
